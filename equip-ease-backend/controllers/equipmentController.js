@@ -1,4 +1,6 @@
 // controllers/equipmentController.js
+const db = require('../config/db');
+
 const { addEquipment, getAllEquipment } = require('../models/equipmentModel');
 
 const addNewEquipment = async (req, res) => {
@@ -82,6 +84,32 @@ const getAllEquipmentPublic = async (req, res) => {
   }
 };
 
+const deleteEquipmentById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ message: 'Invalid equipment ID' });
+    }
 
-module.exports = { addNewEquipment, getEquipmentList, getAllEquipmentPublic };
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Forbidden: Admins only' });
+    }
+
+    const result = await db.query(
+      'DELETE FROM Equipment WHERE Equipment_equipment_id = $1 RETURNING *',
+      [parseInt(id, 10)]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Equipment not found' });
+    }
+
+    res.status(200).json({ message: 'Equipment deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting equipment:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { addNewEquipment, getEquipmentList, getAllEquipmentPublic, deleteEquipmentById, };

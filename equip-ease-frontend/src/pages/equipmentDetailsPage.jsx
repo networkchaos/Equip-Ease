@@ -28,7 +28,10 @@ const EquipmentDetailsPage = () => {
 
     if (u && currentEquipment?.equipment_equipment_id) {
       const storedBookings = JSON.parse(localStorage.getItem(`bookings_${u.username}`)) || [];
-      setBookings(storedBookings.filter(b => b.equipment_id === currentEquipment.equipment_equipment_id));
+      const sortedBookings = storedBookings
+  .filter(b => b.equipment_id === currentEquipment.equipment_equipment_id)
+  .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+setBookings(sortedBookings);
     }
 
     if (currentEquipment?.equipment_equipment_id) {
@@ -65,19 +68,122 @@ const EquipmentDetailsPage = () => {
     e.target.src = placeholderImg;
   };
 
-    const handleInstantBooking = () => {
-  if (!startDate || !endDate) return alert('Please select start and end date.');
-  if (!user) return alert('You must be logged in to book.');
+const handleInstantBooking = async () => {
+  if (!startDate || !endDate) {
+    alert('Please select both start and end dates.');
+    return;
+  }
+
+  const user = getUser();
+  if (!user || !user.token) {
+    return alert('User not authenticated');
+  }
+
+  try {
+    const payload = {
+      equipment_id: currentEquipment.equipment_equipment_id,
+      user_id: user?.user_id,
+      start_date: startDate,
+      end_date: endDate,
+    };
+
+    const res = await axios.post('http://localhost:5001/api/bookings', payload, {
+      headers: {
+        Authorization: `Bearer ${user.token}`
+      }
+    });
+
+    if (res.status === 201 || res.status === 200) {
+      const updatedEquipment = {
+        ...currentEquipment,
+        equipment_status: 'RENTED',
+        equipment_availability: 'RENTED',
+      };
+      setCurrentEquipment(updatedEquipment);
+      addBookingToLocal(updatedEquipment);
+      alert('Booking successful!');
+    } else {
+      alert('Unexpected response from server.');
+      console.error('Unexpected booking response:', res);
+    }
+  } catch (error) {
+    const errMsg =
+      error?.response?.data?.message ||
+      error?.message ||
+      'Failed to create booking.';
+    console.error('Booking error:', error);
+    alert(`Error: ${errMsg}`);
+  }
+};
+
+ const triggerSTKPush = async () => {
+  if (!phoneNumber || !startDate || !endDate) {
+    alert('Please fill all fields before paying.');
+    return;
+  }
+
+  try {
+    setPaymentLoading(true);
+    const res = await axios.post('http://localhost:5001/api/stkpush', {
+      phoneNumber,
+      amount: equipment_price_per_day,
+      equipmentId: equipment_equipment_id,
+      equipmentName: equipment_name,
+      startDate,
+      endDate,
+      user: user?.username || 'Unknown User'
+    });
+
+    if (res.data.success) {
+      alert('STK Push sent. Please check your phone.');
+      setShowMpesaPopup(false);
+      setPaymentProcessingPopup(true);
+
+      setTimeout(async () => {
+        setPaymentProcessingPopup(false);
+        setPaymentSuccessPopup(true);
+
+        // Book on backend
+        await axios.post('http://localhost:5001/api/bookings', {
+          equipment_id: equipment_equipment_id,
+          user_id: user?.user_id,
+          start_date: startDate,
+          end_date: endDate,
+        });
+
+        const updatedEquipment = {
+          ...currentEquipment,
+          equipment_status: 'RENTED',
+          equipment_availability: 'RENTED',
+        };
+        setCurrentEquipment(updatedEquipment);
+        addBookingToLocal(updatedEquipment);
+
+      }, 6000);
+    } else {
+      alert('Failed to initiate payment.');
+    }
+  } catch (error) {
+    console.error('STK Push Error:', error);
+    alert('Error sending STK Push.');
+  } finally {
+    setPaymentLoading(false);
+  }
+};
+
+ const addBookingToLocal = (equipment) => {
+  if (!user || !user.username) return;
 
   const newBooking = {
-    equipment_id: currentEquipment.equipment_equipment_id,
-    equipment_name: currentEquipment.equipment_name,
-    start_date: startDate,
-    end_date: endDate,
-    user: user.username,
-    createdAt: new Date().toISOString(),
-    status: 'RENTED'
-  };
+  equipment_id: equipment.equipment_equipment_id,
+  equipment_name: equipment.equipment_name,
+  start_date: startDate,
+  end_date: endDate,
+  user: user.username,
+  createdAt: new Date().toISOString(),
+  phone_number: phoneNumber, // <-- Add this
+  status: 'RENTED'
+};
 
   const storageKey = `bookings_${user.username}`;
   const prev = JSON.parse(localStorage.getItem(storageKey)) || [];
@@ -87,117 +193,22 @@ const EquipmentDetailsPage = () => {
     b.start_date === newBooking.start_date &&
     b.end_date === newBooking.end_date
   );
-  if (exists) {
-    alert('You have already booked this equipment for the selected dates.');
-    return;
-  }
+  if (exists) return;
 
   const updated = [...prev, newBooking];
-  localStorage.setItem(storageKey, JSON.stringify(updated));
   setBookings(updated);
+  localStorage.setItem(storageKey, JSON.stringify(updated));
 
-  // ✅ Update local equipment and all_equipment storage
-  const updatedEquipment = {
-    ...currentEquipment,
-    equipment_availability: 'RENTED'
-  };
-  setCurrentEquipment(updatedEquipment);
-
+  // Update all equipment list in localStorage too
   const allEquipment = JSON.parse(localStorage.getItem('all_equipment')) || [];
-  const updatedAll = allEquipment.map(e => 
-    e.equipment_equipment_id === updatedEquipment.equipment_equipment_id
-      ? updatedEquipment
-      : e
-  );
-  localStorage.setItem('all_equipment', JSON.stringify(updatedAll));
-
-  // ✅ Notify other components (like ListingsPage)
-  window.dispatchEvent(new Event('equipmentUpdated'));
-
-  alert('Booking successful! Equipment is now marked as RENTED.');
+  const updatedEquipment = allEquipment.map(e => {
+    if (e.equipment_equipment_id === equipment.equipment_equipment_id) {
+      return { ...e, equipment_availability: 'RENTED' };
+    }
+    return e;
+  });
+  localStorage.setItem('all_equipment', JSON.stringify(updatedEquipment));
 };
-
-
-  const triggerSTKPush = async () => {
-    if (!phoneNumber || !startDate || !endDate) {
-      alert('Please fill all fields before paying.');
-      return;
-    }
-
-    try {
-      setPaymentLoading(true);
-      const res = await axios.post('http://localhost:5001/api/stkpush', {
-        phoneNumber,
-        amount: equipment_price_per_day,
-        equipmentId: equipment_equipment_id,
-        equipmentName: equipment_name,
-        startDate,
-        endDate,
-        user: user?.username || 'Unknown User'
-      });
-
-      if (res.data.success) {
-        alert('STK Push sent. Please check your phone.');
-        setShowMpesaPopup(false);
-        setPaymentProcessingPopup(true);
-
-        setTimeout(() => {
-          setPaymentProcessingPopup(false);
-          setPaymentSuccessPopup(true);
-          createBooking();
-        }, 6000);
-      } else {
-        alert('Failed to initiate payment.');
-      }
-    } catch (error) {
-      console.error('STK Push Error:', error);
-      alert('Error sending STK Push.');
-    } finally {
-      setPaymentLoading(false);
-    }
-  };
-
-  const createBooking = () => {
-    if (!user || !user.username) return;
-
-    const newBooking = {
-      equipment_id: currentEquipment.equipment_equipment_id,
-      equipment_name: currentEquipment.equipment_name,
-      start_date: startDate,
-      end_date: endDate,
-      user: user.username,
-      createdAt: new Date().toISOString(),
-      status: 'RENTED'
-    };
-
-    const storageKey = `bookings_${user.username}`;
-    const prev = JSON.parse(localStorage.getItem(storageKey)) || [];
-
-    const exists = prev.some(b =>
-      b.equipment_id === newBooking.equipment_id &&
-      b.start_date === newBooking.start_date &&
-      b.end_date === newBooking.end_date
-    );
-    if (exists) return;
-
-    const updated = [...prev, newBooking];
-    setBookings(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-
-    setCurrentEquipment(prev => ({
-      ...prev,
-      equipment_availability: 'RENTED'
-    }));
-
-    const allEquipment = JSON.parse(localStorage.getItem('all_equipment')) || [];
-    const updatedEquipment = allEquipment.map(e => {
-      if (e.equipment_equipment_id === currentEquipment.equipment_equipment_id) {
-        return { ...e, equipment_availability: 'RENTED' };
-      }
-      return e;
-    });
-    localStorage.setItem('all_equipment', JSON.stringify(updatedEquipment));
-  };
 
   const handleReviewSubmit = () => {
     if (!reviewText.trim()) return;
@@ -251,11 +262,11 @@ const EquipmentDetailsPage = () => {
           <p><strong>Price/Day:</strong> KES {Number(equipment_price_per_day).toLocaleString()}</p>
           <p><strong>Location:</strong> {equipment_location}</p>
           <p>
-            <strong>Status:</strong>{' '}
-            <span style={{ color: bookings.some(b => b.status === 'RENTED') ? 'red' : 'green' }}>
-              {bookings.some(b => b.status === 'RENTED') ? 'RENTED' : equipment_availability}
-            </span>
-          </p>
+  <strong>Status:</strong>{' '}
+  <span style={{ color: equipment_availability === 'RENTED' ? 'red' : 'green' }}>
+    {equipment_availability}
+  </span>
+</p>
           <p><strong>Description:</strong> {equipment_description || 'No description provided.'}</p>
 
           <h3>Book Equipment</h3>
@@ -289,15 +300,16 @@ const EquipmentDetailsPage = () => {
                 }}
               >
                 <p><strong>User:</strong> {b.user}</p>
-                <p><strong>Booking Period:</strong> {b.start_date} to {b.end_date}</p>
-                <p><strong>Return Date:</strong> {b.end_date}</p>
+                <p><strong>Booking Period:</strong> {new Date(b.start_date).toLocaleDateString()} to {new Date(b.end_date).toLocaleDateString()}</p>
+
+                <p><strong>Return Date:</strong> {new Date(b.end_date).toLocaleDateString()}</p>
                 <p>
                   <strong>Status:</strong>{' '}
                   <span style={{ color: b.status === 'RENTED' ? '#16a34a' : '#999' }}>
                     {b.status || 'PENDING'}
                   </span>
                 </p>
-                <p><strong>Contact:</strong> {phoneNumber || 'N/A'}</p>
+                <p><strong>Contact:</strong> {b.phoneNumber || 'N/A'}</p>
               </div>
             ))}
           </div>
@@ -335,7 +347,7 @@ const EquipmentDetailsPage = () => {
             <p><strong>Booking:</strong> {startDate} to {endDate}</p>
             <input
               type="tel"
-              placeholder="Enter phone number"
+              placeholder="Enter phone number +2547XXXXXXXX"
               value={phoneNumber}
               onChange={e => setPhoneNumber(e.target.value)}
               style={inputStyle}

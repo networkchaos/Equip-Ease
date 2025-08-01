@@ -36,7 +36,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/dashboard" element={<DashboardPage user={user} />} />
-            <Route path="/listings" element={<ListingsPage />} />
+            <Route path="/listings" element={<ListingsPage user={user} />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/reviews" element={<ReviewsPage />} />
             <Route path="/community" element={<CommunityPage user={user} />} />

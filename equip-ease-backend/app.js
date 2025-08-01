@@ -6,7 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const equipmentRoutes = require('./routes/equipmentRoutes');
 const path = require('path');
 const equipment = require('./routes/equipment');
-
+const bookingRoutes = require('./routes/bookings');
 const reviewRoutes = require('./routes/review');
 const mpesaRoutes = require('./routes/mpesaRoutes');
 const app = express();
@@ -33,6 +33,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Routes
 app.use('/api/equipment', equipmentRoutes);
 // error handling middleware
+app.use('/api/bookings', bookingRoutes);
 app.use(errorHandler);
 
 module.exports = app;
